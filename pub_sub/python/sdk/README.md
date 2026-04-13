@@ -117,7 +117,7 @@ pip3 install -r requirements.txt
 2. Run the Python subscriber app with Dapr: 
 
 ```bash
-dapr run --app-id order-processor-sdk --resources-path ../../../components/ --app-port 6001 -- uvicorn app:app --port 6002
+dapr run --app-id order-processor-sdk --resources-path ../../../components/ --app-port 6002 -- python3 app.py
 ```
 
 ### Run Python message publisher with Dapr

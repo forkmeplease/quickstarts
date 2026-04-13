@@ -1,5 +1,4 @@
 Flask
 dapr>=1.16.0
-cloudevents
-uvicorn
+cloudevents>=2.0.0
 typing-extensions
