@@ -12,20 +12,23 @@
 
 """Workflow history propagation quickstart (Python SDK).
 
-Scenario: credit-card payment processing with fraud detection.
+Scenario: patient intake / e-prescribing pipeline. A compliance audit and a
+pharmacy dispense step refuse to act unless the propagated history proves
+the required upstream checks (insurance, allergies, drug interactions)
+actually ran.
 
 Flow:
-    MerchantCheckout (root workflow)
-      └─ ValidateMerchant  (activity, no propagation)
-      └─ ProcessPayment    (child workflow, PropagationScope.LINEAGE)
-            └─ ValidateCard         (activity, no propagation)
-            └─ CheckSpendingLimits  (activity, no propagation)
-            └─ FraudDetection       (child workflow, PropagationScope.LINEAGE)
-            |      reads: MerchantCheckout/ValidateMerchant
-            |             ProcessPayment/ValidateCard
-            |             ProcessPayment/CheckSpendingLimits
-            └─ SettlePayment        (activity, PropagationScope.OWN_HISTORY)
-                   reads: ProcessPayment events only (no ancestor chain)
+    PatientIntake (root workflow)
+      |- VerifyInsurance      (activity, no propagation)
+      `- PrescribeMedication  (child workflow, PropagationScope.LINEAGE)
+            |- CheckAllergies         (activity, no propagation)
+            |- ScreenDrugInteractions (activity, no propagation)
+            |- ComplianceAudit        (grandchild wf, PropagationScope.LINEAGE)
+            |     reads: PatientIntake/VerifyInsurance
+            |            PrescribeMedication/CheckAllergies
+            |            PrescribeMedication/ScreenDrugInteractions
+            `- DispenseMedication     (activity, PropagationScope.OWN_HISTORY)
+                  reads: PrescribeMedication events only (no PatientIntake)
 
 This requires Dapr 1.18+ (dapr/dapr#9810) and dapr-ext-workflow 1.18+
 (dapr/python-sdk#1025). Against an older sidecar the propagation field is
@@ -37,7 +40,6 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import asdict, dataclass
-from typing import Optional
 
 import dapr.ext.workflow as wf
 
@@ -46,32 +48,34 @@ import dapr.ext.workflow as wf
 # ---------------------------------------------------------------------------
 
 @dataclass
-class PaymentRequest:
-    card_last4: str
-    amount: float
-    currency: str
-    merchant_id: str
-    description: str
+class PatientRecord:
+    patient_id: str
+    name: str
+    dob: str
+    mrn: str
+    condition: str
+    medication: str
+    dosage: float
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))
 
     @classmethod
-    def from_json(cls, data: str) -> "PaymentRequest":
+    def from_json(cls, data: str) -> "PatientRecord":
         return cls(**json.loads(data))
 
 
 @dataclass
-class FraudCheckResult:
+class ComplianceResult:
+    compliant: bool
     risk_score: float
-    approved: bool
     reason: str
     event_count: int
 
 
 @dataclass
-class SettlementResult:
-    transaction_id: str
+class DispenseResult:
+    dispense_id: str
     status: str
     event_count: int
 
@@ -87,63 +91,69 @@ wfr = wf.WorkflowRuntime()
 # Activities
 # ---------------------------------------------------------------------------
 
-@wfr.activity(name='validate_merchant')
-def validate_merchant(ctx: wf.WorkflowActivityContext, req_json: str) -> bool:
-    req = PaymentRequest.from_json(req_json)
-    print(f'  [ValidateMerchant] Validating merchant {req.merchant_id}', flush=True)
+@wfr.activity(name='VerifyInsurance')
+def verify_insurance(ctx: wf.WorkflowActivityContext, rec_json: str) -> bool:
+    rec = PatientRecord.from_json(rec_json)
+    print(f'  [VerifyInsurance] Checking coverage for patient {rec.patient_id}', flush=True)
     return True
 
 
-@wfr.activity(name='validate_card')
-def validate_card(ctx: wf.WorkflowActivityContext, req_json: str) -> bool:
-    req = PaymentRequest.from_json(req_json)
-    # This activity receives no propagated history (called without propagation= param)
-    history = ctx.get_propagated_history()
+@wfr.activity(name='CheckAllergies')
+def check_allergies(ctx: wf.WorkflowActivityContext, rec_json: str) -> bool:
+    rec = PatientRecord.from_json(rec_json)
     print(
-        f'  [ValidateCard] Validating card ****{req.card_last4} '
-        f'(propagated history: {_describe_activity_history(history)})',
+        f'  [CheckAllergies] Screening {rec.patient_id} for {rec.medication}',
         flush=True,
     )
     return True
 
 
-@wfr.activity(name='check_spending_limits')
-def check_spending_limits(ctx: wf.WorkflowActivityContext, req_json: str) -> bool:
-    req = PaymentRequest.from_json(req_json)
-    history = ctx.get_propagated_history()
+@wfr.activity(name='ScreenDrugInteractions')
+def screen_drug_interactions(ctx: wf.WorkflowActivityContext, rec_json: str) -> bool:
+    rec = PatientRecord.from_json(rec_json)
     print(
-        f'  [CheckSpendingLimits] Checking {req.amount} {req.currency} '
-        f'(propagated history: {_describe_activity_history(history)})',
+        f'  [ScreenDrugInteractions] Screening {rec.medication} {rec.dosage:.0f}mg for {rec.patient_id}',
         flush=True,
     )
-    return req.amount <= 10000
+    return True
 
 
-@wfr.activity(name='settle_payment')
-def settle_payment(ctx: wf.WorkflowActivityContext, req_json: str) -> str:
-    """Receives PropagationScope.OWN_HISTORY from ProcessPayment — sees only
-    the ProcessPayment workflow's events, not the MerchantCheckout ancestor."""
-    req = PaymentRequest.from_json(req_json)
+@wfr.activity(name='DispenseMedication')
+def dispense_medication(ctx: wf.WorkflowActivityContext, rec_json: str) -> str:
+    """Receives PropagationScope.OWN_HISTORY from PrescribeMedication — sees only
+    the PrescribeMedication workflow's events, not the PatientIntake ancestor.
+
+    The pharmacy dispense system intentionally does not get to see the
+    upstream patient-intake chain; it only needs proof that the prescribing
+    workflow itself ran the right checks.
+    """
+    rec = PatientRecord.from_json(rec_json)
     history = ctx.get_propagated_history()
 
     event_count = 0
     if history is not None:
         workflows = history.get_workflows()
-        event_count = sum(1 for _ in workflows)  # coarse count; use history.events for full count
-        print(f'  [SettlePayment] Propagated workflows: {[w.name for w in workflows]}', flush=True)
+        event_count = len(workflows)
+        print(
+            f'  [DispenseMedication] Propagated workflows: {[w.name for w in workflows]}',
+            flush=True,
+        )
         for wf_result in workflows:
             print(
-                f'  [SettlePayment]   workflow: name={wf_result.name} app={wf_result.app_id}',
+                f'  [DispenseMedication]   workflow: name={wf_result.name} app={wf_result.app_id}',
                 flush=True,
             )
     else:
-        print('  [SettlePayment] No propagated history received', flush=True)
+        print('  [DispenseMedication] No propagated history received', flush=True)
 
-    txn_id = f'txn-{req.merchant_id}-{int(time.time() * 1000)}'
-    print(f'  [SettlePayment] SETTLED: {txn_id}', flush=True)
-    return json.dumps(asdict(SettlementResult(
-        transaction_id=txn_id,
-        status='settled',
+    dispense_id = f'rx-{rec.patient_id}-{int(time.time() * 1000)}'
+    print(
+        f'  [DispenseMedication] DISPENSED: {dispense_id} ({rec.medication} {rec.dosage:.0f}mg)',
+        flush=True,
+    )
+    return json.dumps(asdict(DispenseResult(
+        dispense_id=dispense_id,
+        status='dispensed',
         event_count=event_count,
     )))
 
@@ -152,230 +162,277 @@ def settle_payment(ctx: wf.WorkflowActivityContext, req_json: str) -> str:
 # Child workflows
 # ---------------------------------------------------------------------------
 
-@wfr.workflow(name='FraudDetection')
-def fraud_detection(ctx: wf.DaprWorkflowContext, req_json: str):
+@wfr.workflow(name='ComplianceAudit')
+def compliance_audit(ctx: wf.DaprWorkflowContext, rec_json: str):
     """Grandchild workflow that inspects the full ancestor chain.
 
-    Receives PropagationScope.LINEAGE from ProcessPayment, so its
-    get_propagated_history() contains events from both MerchantCheckout
-    and ProcessPayment.
+    Receives PropagationScope.LINEAGE from PrescribeMedication, so its
+    get_propagated_history() contains events from both PatientIntake and
+    PrescribeMedication. It refuses to approve dispensing unless the required
+    upstream steps (insurance, allergies, drug interactions) are all present
+    and completed in the propagated history.
     """
-    req = PaymentRequest.from_json(req_json)
-    print(
-        f'  [FraudDetection] Checking payment ****{req.card_last4} {req.amount} {req.currency}',
-        flush=True,
-    )
+    rec = PatientRecord.from_json(rec_json)
+    if not ctx.is_replaying:
+        print(
+            f'  [ComplianceAudit] Auditing prescription for patient {rec.patient_id}',
+            flush=True,
+        )
 
     history = ctx.get_propagated_history()
     if history is None:
-        print(
-            '  [FraudDetection] WARNING: no propagated history — sidecar may not support 1.18+',
-            flush=True,
-        )
-        result = FraudCheckResult(
+        if not ctx.is_replaying:
+            print(
+                '  [ComplianceAudit] WARNING: no propagated history — sidecar may not support 1.18+',
+                flush=True,
+            )
+            print(
+                '  [ComplianceAudit] BLOCKED — cannot verify upstream pipeline without history',
+                flush=True,
+            )
+        return json.dumps(asdict(ComplianceResult(
+            compliant=False,
             risk_score=1.0,
-            approved=False,
             reason='no execution history provided — cannot verify caller pipeline',
             event_count=0,
-        )
-        return json.dumps(asdict(result))
+        )))
 
     workflows = history.get_workflows()
-    print(
-        f'  [FraudDetection] Received propagated history with workflows: '
-        f'{[w.name for w in workflows]}',
-        flush=True,
-    )
+    if not ctx.is_replaying:
+        print(
+            f'  [ComplianceAudit] Received propagated history with workflows: '
+            f'{[w.name for w in workflows]}',
+            flush=True,
+        )
 
-    # Verify the ancestor chain includes the required steps.
+    # Verify the ancestor chain includes the required workflows.
     try:
-        merchant_wf = history.get_workflow_by_name('MerchantCheckout')
+        intake_wf = history.get_workflow_by_name('PatientIntake')
     except wf.PropagationNotFoundError:
-        return json.dumps(asdict(FraudCheckResult(
+        return json.dumps(asdict(ComplianceResult(
+            compliant=False,
             risk_score=0.9,
-            approved=False,
-            reason='MerchantCheckout missing from propagated history',
-            event_count=0,
+            reason='PatientIntake missing from propagated history',
+            event_count=len(workflows),
         )))
 
     try:
-        process_wf = history.get_workflow_by_name('ProcessPayment')
+        prescribe_wf = history.get_workflow_by_name('PrescribeMedication')
     except wf.PropagationNotFoundError:
-        return json.dumps(asdict(FraudCheckResult(
+        return json.dumps(asdict(ComplianceResult(
+            compliant=False,
             risk_score=0.9,
-            approved=False,
-            reason='ProcessPayment missing from propagated history',
-            event_count=0,
+            reason='PrescribeMedication missing from propagated history',
+            event_count=len(workflows),
         )))
 
+    # Verify the required activity completions are recorded.
     try:
-        merchant_act = merchant_wf.get_activity_by_name('validate_merchant')
+        insurance_act = intake_wf.get_activity_by_name('VerifyInsurance')
     except wf.PropagationNotFoundError:
-        return json.dumps(asdict(FraudCheckResult(
+        return json.dumps(asdict(ComplianceResult(
+            compliant=False,
             risk_score=0.85,
-            approved=False,
-            reason='validate_merchant not found in MerchantCheckout history',
-            event_count=0,
+            reason='VerifyInsurance not found in PatientIntake history',
+            event_count=len(workflows),
         )))
 
     try:
-        card_act = process_wf.get_activity_by_name('validate_card')
-        spending_act = process_wf.get_activity_by_name('check_spending_limits')
+        allergies_act = prescribe_wf.get_activity_by_name('CheckAllergies')
+        interactions_act = prescribe_wf.get_activity_by_name('ScreenDrugInteractions')
     except wf.PropagationNotFoundError as exc:
-        return json.dumps(asdict(FraudCheckResult(
+        return json.dumps(asdict(ComplianceResult(
+            compliant=False,
             risk_score=0.85,
-            approved=False,
-            reason=f'required activity missing from ProcessPayment history: {exc}',
-            event_count=0,
+            reason=f'required activity missing from PrescribeMedication history: {exc}',
+            event_count=len(workflows),
         )))
 
-    print(
-        f'  [FraudDetection] Verification:\n'
-        f'    MerchantCheckout/validate_merchant: completed={merchant_act.completed}\n'
-        f'    ProcessPayment/validate_card:        completed={card_act.completed}\n'
-        f'    ProcessPayment/check_spending_limits: completed={spending_act.completed}',
-        flush=True,
-    )
+    if not ctx.is_replaying:
+        print('  [ComplianceAudit] Verification:', flush=True)
+        print(
+            f'    PatientIntake/VerifyInsurance:              completed={insurance_act.completed}',
+            flush=True,
+        )
+        print(
+            f'    PrescribeMedication/CheckAllergies:         completed={allergies_act.completed}',
+            flush=True,
+        )
+        print(
+            f'    PrescribeMedication/ScreenDrugInteractions: completed={interactions_act.completed}',
+            flush=True,
+        )
 
-    if not (merchant_act.completed and card_act.completed and spending_act.completed):
-        return json.dumps(asdict(FraudCheckResult(
+    if not (insurance_act.completed and allergies_act.completed and interactions_act.completed):
+        if not ctx.is_replaying:
+            print(
+                '  [ComplianceAudit] BLOCKED — required upstream checks not completed',
+                flush=True,
+            )
+        return json.dumps(asdict(ComplianceResult(
+            compliant=False,
             risk_score=0.9,
-            approved=False,
             reason='required upstream checks not completed in propagated history',
             event_count=len(workflows),
         )))
 
-    risk_score = 0.3 if req.amount > 1000 else 0.1
-    print(f'  [FraudDetection] APPROVED (risk={risk_score:.2f})', flush=True)
-    return json.dumps(asdict(FraudCheckResult(
+    risk_score = 0.3 if rec.dosage > 1000 else 0.1
+    if not ctx.is_replaying:
+        print(f'  [ComplianceAudit] APPROVED (risk={risk_score:.2f})', flush=True)
+    return json.dumps(asdict(ComplianceResult(
+        compliant=True,
         risk_score=risk_score,
-        approved=True,
         reason='all upstream checks verified in propagated history',
         event_count=len(workflows),
     )))
 
 
-@wfr.workflow(name='ProcessPayment')
-def process_payment(ctx: wf.DaprWorkflowContext, req_json: str):
-    """Child workflow — orchestrates card validation, fraud check, and settlement.
+@wfr.workflow(name='PrescribeMedication')
+def prescribe_medication(ctx: wf.DaprWorkflowContext, rec_json: str):
+    """Child workflow — orchestrates allergy + interaction screening, compliance
+    audit, and dispensing.
 
-    Receives PropagationScope.LINEAGE from MerchantCheckout, so it holds
-    the full ancestor chain when calling its own children.
+    Receives PropagationScope.LINEAGE from PatientIntake, so it holds the full
+    ancestor chain when calling its own children. Calls ComplianceAudit with
+    LINEAGE (audit needs to see the grandparent) and DispenseMedication with
+    OWN_HISTORY (pharmacy only sees the prescribing step, not the intake).
     """
-    req = PaymentRequest.from_json(req_json)
-    print(
-        f'  [ProcessPayment] Starting payment ****{req.card_last4} '
-        f'{req.amount} {req.currency}',
-        flush=True,
-    )
+    rec = PatientRecord.from_json(rec_json)
+    if not ctx.is_replaying:
+        print(
+            f'  [PrescribeMedication] Starting prescription: {rec.medication} '
+            f'{rec.dosage:.0f}mg for {rec.condition}',
+            flush=True,
+        )
 
-    # Step 1: Validate card (no propagation)
-    print('  [ProcessPayment] Step 1: validate_card (no propagation)', flush=True)
-    card_valid = yield ctx.call_activity(validate_card, input=req_json)
-    if not card_valid:
-        return 'payment declined: invalid card'
-    print('  [ProcessPayment] Step 1 complete: card valid', flush=True)
+    # Step 1: Allergy check (no propagation — plain activity)
+    if not ctx.is_replaying:
+        print(
+            '  [PrescribeMedication] Step 1: CheckAllergies (no propagation)',
+            flush=True,
+        )
+    allergy_clear = yield ctx.call_activity(check_allergies, input=rec_json)
+    if not allergy_clear:
+        return 'prescription declined: known allergy'
+    if not ctx.is_replaying:
+        print('  [PrescribeMedication] Step 1 complete: allergy clear', flush=True)
 
-    # Step 2: Check spending limits (no propagation)
-    print('  [ProcessPayment] Step 2: check_spending_limits (no propagation)', flush=True)
-    within_limits = yield ctx.call_activity(check_spending_limits, input=req_json)
-    if not within_limits:
-        return 'payment declined: spending limit exceeded'
-    print('  [ProcessPayment] Step 2 complete: within limits', flush=True)
+    # Step 2: Drug interaction screen (no propagation)
+    if not ctx.is_replaying:
+        print(
+            '  [PrescribeMedication] Step 2: ScreenDrugInteractions (no propagation)',
+            flush=True,
+        )
+    interactions_clear = yield ctx.call_activity(screen_drug_interactions, input=rec_json)
+    if not interactions_clear:
+        return 'prescription declined: drug interaction risk'
+    if not ctx.is_replaying:
+        print('  [PrescribeMedication] Step 2 complete: no interactions', flush=True)
 
-    # Step 3: Fraud detection child workflow with LINEAGE propagation.
-    # The grandchild sees both MerchantCheckout AND ProcessPayment events.
-    print(
-        '  [ProcessPayment] Step 3: FraudDetection child wf '
-        '(PropagationScope.LINEAGE)',
-        flush=True,
-    )
-    fraud_json = yield ctx.call_child_workflow(
-        fraud_detection,
-        input=req_json,
+    # Step 3: Compliance audit grandchild workflow with LINEAGE propagation.
+    # The grandchild sees both PatientIntake AND PrescribeMedication events.
+    if not ctx.is_replaying:
+        print(
+            '  [PrescribeMedication] Step 3: ComplianceAudit child wf '
+            '(PropagationScope.LINEAGE)',
+            flush=True,
+        )
+    audit_json = yield ctx.call_child_workflow(
+        compliance_audit,
+        input=rec_json,
         propagation=wf.PropagationScope.LINEAGE,
     )
-    fraud_result = FraudCheckResult(**json.loads(fraud_json))
-    if not fraud_result.approved:
+    audit = ComplianceResult(**json.loads(audit_json))
+    if not audit.compliant:
         return (
-            f'payment declined: fraud check failed '
-            f'(risk={fraud_result.risk_score:.2f}, reason={fraud_result.reason})'
+            f'prescription blocked: compliance audit failed '
+            f'(risk={audit.risk_score:.2f}, reason={audit.reason})'
         )
-    print(
-        f'  [ProcessPayment] Step 3 complete: fraud check passed '
-        f'(risk={fraud_result.risk_score:.2f})',
-        flush=True,
-    )
+    if not ctx.is_replaying:
+        print(
+            f'  [PrescribeMedication] Step 3 complete: compliance audit passed '
+            f'(risk={audit.risk_score:.2f}, {audit.event_count} workflow(s) verified)',
+            flush=True,
+        )
 
-    # Step 4: Settle the payment with OWN_HISTORY propagation.
-    # SettlePayment only sees ProcessPayment's own events, not MerchantCheckout.
-    print(
-        '  [ProcessPayment] Step 4: settle_payment (PropagationScope.OWN_HISTORY)',
-        flush=True,
-    )
-    settlement_json = yield ctx.call_activity(
-        settle_payment,
-        input=req_json,
+    # Step 4: Dispense the medication with OWN_HISTORY propagation.
+    # DispenseMedication only sees PrescribeMedication's events, not PatientIntake.
+    if not ctx.is_replaying:
+        print(
+            '  [PrescribeMedication] Step 4: DispenseMedication '
+            '(PropagationScope.OWN_HISTORY)',
+            flush=True,
+        )
+    dispense_json = yield ctx.call_activity(
+        dispense_medication,
+        input=rec_json,
         propagation=wf.PropagationScope.OWN_HISTORY,
     )
-    settlement = SettlementResult(**json.loads(settlement_json))
-    print(
-        f'  [ProcessPayment] Step 4 complete: settled (txn={settlement.transaction_id})',
-        flush=True,
-    )
+    dispense = DispenseResult(**json.loads(dispense_json))
+    if not ctx.is_replaying:
+        print(
+            f'  [PrescribeMedication] Step 4 complete: dispensed '
+            f'(id={dispense.dispense_id}, {dispense.event_count} workflow(s) verified)',
+            flush=True,
+        )
 
     result = (
-        f'payment settled: txn={settlement.transaction_id}, '
-        f'card=****{req.card_last4}, amount={req.amount} {req.currency}'
+        f'dispensed: id={dispense.dispense_id}, patient={rec.patient_id}, '
+        f'drug={rec.medication} {rec.dosage:.0f}mg'
     )
-    print(f'  [ProcessPayment] COMPLETE: {result}', flush=True)
+    if not ctx.is_replaying:
+        print(f'  [PrescribeMedication] COMPLETE: {result}', flush=True)
     return result
 
 
-@wfr.workflow(name='MerchantCheckout')
-def merchant_checkout(ctx: wf.DaprWorkflowContext, req_json: str):
-    """Root workflow — validates the merchant then delegates payment to a child
-    workflow with full LINEAGE propagation so the grandchild FraudDetection
-    can inspect the complete ancestor chain.
+@wfr.workflow(name='PatientIntake')
+def patient_intake(ctx: wf.DaprWorkflowContext, rec_json: str):
+    """Root workflow — verifies the patient's insurance then delegates the
+    prescription to a child workflow with full LINEAGE propagation so the
+    grandchild ComplianceAudit can inspect the complete ancestor chain.
     """
-    req = PaymentRequest.from_json(req_json)
-    print(
-        f'  [MerchantCheckout] Starting checkout for merchant {req.merchant_id}',
-        flush=True,
-    )
+    rec = PatientRecord.from_json(rec_json)
+    if not ctx.is_replaying:
+        print(
+            f'  [PatientIntake] Starting intake for patient {rec.patient_id}',
+            flush=True,
+        )
 
-    # Step 1: Validate merchant (no propagation — plain activity)
-    print('  [MerchantCheckout] Step 1: validate_merchant (no propagation)', flush=True)
-    yield ctx.call_activity(validate_merchant, input=req_json)
-    print('  [MerchantCheckout] Step 1 complete: merchant valid', flush=True)
+    # Step 1: Verify insurance (no propagation — plain activity)
+    if not ctx.is_replaying:
+        print(
+            '  [PatientIntake] Step 1: VerifyInsurance (no propagation)',
+            flush=True,
+        )
+    insured = yield ctx.call_activity(verify_insurance, input=rec_json)
+    if not insured:
+        return 'intake declined: insurance not on file'
+    if not ctx.is_replaying:
+        print('  [PatientIntake] Step 1 complete: insurance verified', flush=True)
 
-    # Step 2: Delegate to ProcessPayment with LINEAGE propagation.
-    # ProcessPayment inherits this workflow's history plus any it received from above.
-    print(
-        '  [MerchantCheckout] Step 2: ProcessPayment child wf '
-        '(PropagationScope.LINEAGE)',
-        flush=True,
-    )
+    # Step 2: Delegate to PrescribeMedication with LINEAGE propagation.
+    # PrescribeMedication inherits this workflow's history so its own
+    # grandchild ComplianceAudit can verify the complete ancestor chain.
+    if not ctx.is_replaying:
+        print(
+            '  [PatientIntake] Step 2: PrescribeMedication child wf '
+            '(PropagationScope.LINEAGE)',
+            flush=True,
+        )
     result = yield ctx.call_child_workflow(
-        process_payment,
-        input=req_json,
+        prescribe_medication,
+        input=rec_json,
         propagation=wf.PropagationScope.LINEAGE,
     )
 
-    print(f'  [MerchantCheckout] COMPLETE: {result}', flush=True)
+    if not ctx.is_replaying:
+        print(f'  [PatientIntake] COMPLETE: {result}', flush=True)
     return result
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _describe_activity_history(history: Optional[wf.PropagatedHistory]) -> str:
-    if history is None:
-        return 'none'
-    workflows = history.get_workflows()
-    return f'{len(workflows)} workflow(s)'
-
 
 def _banner(msg: str) -> str:
     line = '=' * (len(msg) + 4)
@@ -389,28 +446,30 @@ def _banner(msg: str) -> str:
 if __name__ == '__main__':
     wfr.start()
 
-    req = PaymentRequest(
-        card_last4='4242',
-        amount=149.99,
-        currency='USD',
-        merchant_id='merchant-abc',
-        description='Online purchase',
+    rec = PatientRecord(
+        patient_id='P-1042',
+        name='Jane Doe',
+        dob='1985-06-12',
+        mrn='MRN-77231',
+        condition='bacterial sinusitis',
+        medication='amoxicillin',
+        dosage=500,
     )
 
-    print(_banner('WORKFLOW HISTORY PROPAGATION DEMO'), flush=True)
+    print(_banner('WORKFLOW HISTORY PROPAGATION DEMO — PATIENT INTAKE'), flush=True)
     print(flush=True)
-    print('  Flow: MerchantCheckout -> validate_merchant', flush=True)
-    print('           -> ProcessPayment (child wf, LINEAGE)', flush=True)
-    print('               -> validate_card -> check_spending_limits', flush=True)
-    print('               -> FraudDetection (child wf, LINEAGE)    <-- sees MerchantCheckout + ProcessPayment events', flush=True)
-    print('               -> settle_payment (activity, OWN_HISTORY) <-- sees only ProcessPayment events', flush=True)
+    print('  Flow: PatientIntake -> VerifyInsurance', flush=True)
+    print('           -> PrescribeMedication (child wf, LINEAGE)', flush=True)
+    print('               -> CheckAllergies -> ScreenDrugInteractions', flush=True)
+    print('               -> ComplianceAudit (child wf, LINEAGE)        <-- sees PatientIntake + PrescribeMedication events', flush=True)
+    print('               -> DispenseMedication (activity, OWN_HISTORY) <-- sees only PrescribeMedication events', flush=True)
     print(flush=True)
 
     wf_client = wf.DaprWorkflowClient()
     instance_id = wf_client.schedule_new_workflow(
-        workflow=merchant_checkout,
-        input=req.to_json(),
-        instance_id='checkout-001',
+        workflow=patient_intake,
+        input=rec.to_json(),
+        instance_id='intake-001',
     )
     print(f'  [main] Started workflow instance: {instance_id}', flush=True)
 

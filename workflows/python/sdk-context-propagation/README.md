@@ -17,40 +17,44 @@ When a parent workflow calls a child workflow or activity it can optionally atta
 | **Own history** | `PropagationScope.OWN_HISTORY` | Only the direct caller's events |
 | **Lineage** | `PropagationScope.LINEAGE` | Caller's events **plus** any ancestor history the caller itself received |
 
-## Scenario: Credit-card payment with fraud detection
+## Scenario: Patient intake / e-prescribing
+
+A compliance audit and a pharmacy dispense step refuse to act unless the propagated history proves the required upstream checks (insurance, allergies, drug interactions) actually ran.
 
 ```
-MerchantCheckout (root)
-  └─ validate_merchant         (activity, no propagation)
-  └─ ProcessPayment            (child wf, LINEAGE)
-        └─ validate_card       (activity, no propagation)
-        └─ check_spending_limits (activity, no propagation)
-        └─ FraudDetection      (grandchild wf, LINEAGE)
-        |      reads MerchantCheckout/validate_merchant
-        |            ProcessPayment/validate_card
-        |            ProcessPayment/check_spending_limits
-        └─ settle_payment      (activity, OWN_HISTORY)
-               reads ProcessPayment events only
+PatientIntake (root)
+  └─ VerifyInsurance       (activity, no propagation)
+  └─ PrescribeMedication   (child wf, LINEAGE)
+        └─ CheckAllergies         (activity, no propagation)
+        └─ ScreenDrugInteractions (activity, no propagation)
+        └─ ComplianceAudit        (grandchild wf, LINEAGE)
+        |      reads PatientIntake/VerifyInsurance
+        |            PrescribeMedication/CheckAllergies
+        |            PrescribeMedication/ScreenDrugInteractions
+        └─ DispenseMedication     (activity, OWN_HISTORY)
+               reads PrescribeMedication events only
 ```
 
-`FraudDetection` uses `PropagationScope.LINEAGE` to see the **full ancestor chain** — it can verify both the merchant validation (performed by the grandparent) and the card/limit checks (performed by the parent) before approving the transaction.
+`ComplianceAudit` uses `PropagationScope.LINEAGE` to see the **full ancestor chain** — it can verify both the insurance check (performed by the grandparent `PatientIntake`) and the allergy/interaction checks (performed by the parent `PrescribeMedication`) before approving the prescription.
 
-`settle_payment` uses `PropagationScope.OWN_HISTORY` to see only the **direct caller's events** — a trust-boundary mode that limits visibility to what `ProcessPayment` itself executed.
+`DispenseMedication` uses `PropagationScope.OWN_HISTORY` to see only the **direct caller's events** — a trust-boundary mode that limits visibility to what `PrescribeMedication` itself executed. The pharmacy dispense system doesn't need (or get to see) the upstream patient-intake chain.
+
+This sample mirrors the canonical Go reference [dapr/go-sdk#823](https://github.com/dapr/go-sdk/pull/823) and the [Go quickstart](https://github.com/dapr/quickstarts/pull/1315).
 
 ## Python API surface
 
 ```python
 # Parent workflow — propagate LINEAGE when calling a child workflow
 result = yield ctx.call_child_workflow(
-    fraud_detection,
-    input=req_json,
+    compliance_audit,
+    input=rec_json,
     propagation=wf.PropagationScope.LINEAGE,
 )
 
 # Parent workflow — propagate OWN_HISTORY when calling an activity
-settlement = yield ctx.call_activity(
-    settle_payment,
-    input=req_json,
+dispense = yield ctx.call_activity(
+    dispense_medication,
+    input=rec_json,
     propagation=wf.PropagationScope.OWN_HISTORY,
 )
 
@@ -58,10 +62,10 @@ settlement = yield ctx.call_activity(
 history = ctx.get_propagated_history()   # returns PropagatedHistory | None
 
 if history is not None:
-    process_wf = history.get_workflow_by_name('ProcessPayment')   # raises PropagationNotFoundError if missing
-    card_act    = process_wf.get_activity_by_name('validate_card')
-    print(card_act.completed)   # bool
-    print(card_act.output)      # JSON string
+    intake_wf  = history.get_workflow_by_name('PatientIntake')   # raises PropagationNotFoundError if missing
+    insurance  = intake_wf.get_activity_by_name('VerifyInsurance')
+    print(insurance.completed)   # bool
+    print(insurance.output)      # JSON string
 ```
 
 Key types exported from `dapr.ext.workflow`:
@@ -70,6 +74,8 @@ Key types exported from `dapr.ext.workflow`:
 - `WorkflowResult` — per-workflow slice; call `.get_activity_by_name(name)` or `.get_child_workflow_by_name(name)`
 - `ActivityResult` — has `.completed`, `.output` fields
 - `PropagationNotFoundError` — raised when a named workflow/activity is not in the history
+
+> **Replay safety**: workflow code runs many times during durable execution. Guard side-effecting calls — including `print()` — with `if not ctx.is_replaying:` so they only fire on the live execution, not on each replay.
 
 ## Prerequisites
 
@@ -93,49 +99,55 @@ dapr run -f .
 ## Expected output
 
 ```
-============================================
-= WORKFLOW HISTORY PROPAGATION DEMO =
-============================================
+============================================================
+= WORKFLOW HISTORY PROPAGATION DEMO — PATIENT INTAKE =
+============================================================
 
-  Flow: MerchantCheckout -> validate_merchant
-           -> ProcessPayment (child wf, LINEAGE)
-               -> validate_card -> check_spending_limits
-               -> FraudDetection (child wf, LINEAGE)    <-- sees MerchantCheckout + ProcessPayment events
-               -> settle_payment (activity, OWN_HISTORY) <-- sees only ProcessPayment events
+  Flow: PatientIntake -> VerifyInsurance
+           -> PrescribeMedication (child wf, LINEAGE)
+               -> CheckAllergies -> ScreenDrugInteractions
+               -> ComplianceAudit (child wf, LINEAGE)        <-- sees PatientIntake + PrescribeMedication events
+               -> DispenseMedication (activity, OWN_HISTORY) <-- sees only PrescribeMedication events
 
-  [main] Started workflow instance: checkout-001
-  [MerchantCheckout] Starting checkout for merchant merchant-abc
-  [MerchantCheckout] Step 1: validate_merchant (no propagation)
-  [ValidateMerchant] Validating merchant merchant-abc
-  [MerchantCheckout] Step 1 complete: merchant valid
-  [MerchantCheckout] Step 2: ProcessPayment child wf (PropagationScope.LINEAGE)
-  [ProcessPayment] Starting payment ****4242 149.99 USD
-  [ProcessPayment] Step 1: validate_card (no propagation)
-  [ValidateCard] Validating card ****4242 (propagated history: none)
-  [ProcessPayment] Step 1 complete: card valid
-  [ProcessPayment] Step 2: check_spending_limits (no propagation)
-  [CheckSpendingLimits] Checking 149.99 USD (propagated history: none)
-  [ProcessPayment] Step 2 complete: within limits
-  [ProcessPayment] Step 3: FraudDetection child wf (PropagationScope.LINEAGE)
-  [FraudDetection] Received propagated history with workflows: ['MerchantCheckout', 'ProcessPayment']
-  [FraudDetection] Verification:
-    MerchantCheckout/validate_merchant: completed=True
-    ProcessPayment/validate_card:        completed=True
-    ProcessPayment/check_spending_limits: completed=True
-  [FraudDetection] APPROVED (risk=0.10)
-  [ProcessPayment] Step 3 complete: fraud check passed (risk=0.10)
-  [ProcessPayment] Step 4: settle_payment (PropagationScope.OWN_HISTORY)
-  [SettlePayment] Propagated workflows: ['ProcessPayment']
-  [SettlePayment] SETTLED: txn-merchant-abc-1748000000000
-  [ProcessPayment] Step 4 complete: settled (txn=txn-merchant-abc-...)
-  [ProcessPayment] COMPLETE: payment settled: ...
-  [MerchantCheckout] COMPLETE: payment settled: ...
-  [main] Workflow completed! Output: "payment settled: ..."
+  [main] Started workflow instance: intake-001
+  [PatientIntake] Starting intake for patient P-1042
+  [PatientIntake] Step 1: VerifyInsurance (no propagation)
+  [VerifyInsurance] Checking coverage for patient P-1042
+  [PatientIntake] Step 1 complete: insurance verified
+  [PatientIntake] Step 2: PrescribeMedication child wf (PropagationScope.LINEAGE)
+  [PrescribeMedication] Starting prescription: amoxicillin 500mg for bacterial sinusitis
+  [PrescribeMedication] Step 1: CheckAllergies (no propagation)
+  [CheckAllergies] Screening P-1042 for amoxicillin
+  [PrescribeMedication] Step 1 complete: allergy clear
+  [PrescribeMedication] Step 2: ScreenDrugInteractions (no propagation)
+  [ScreenDrugInteractions] Screening amoxicillin 500mg for P-1042
+  [PrescribeMedication] Step 2 complete: no interactions
+  [PrescribeMedication] Step 3: ComplianceAudit child wf (PropagationScope.LINEAGE)
+  [ComplianceAudit] Auditing prescription for patient P-1042
+  [ComplianceAudit] Received propagated history with workflows: ['PatientIntake', 'PrescribeMedication']
+  [ComplianceAudit] Verification:
+    PatientIntake/VerifyInsurance:              completed=True
+    PrescribeMedication/CheckAllergies:         completed=True
+    PrescribeMedication/ScreenDrugInteractions: completed=True
+  [ComplianceAudit] APPROVED (risk=0.10)
+  [PrescribeMedication] Step 3 complete: compliance audit passed (risk=0.10, 2 workflow(s) verified)
+  [PrescribeMedication] Step 4: DispenseMedication (PropagationScope.OWN_HISTORY)
+  [DispenseMedication] Propagated workflows: ['PrescribeMedication']
+  [DispenseMedication]   workflow: name=PrescribeMedication app=order-processor
+  [DispenseMedication] DISPENSED: rx-P-1042-... (amoxicillin 500mg)
+  [PrescribeMedication] Step 4 complete: dispensed (id=rx-P-1042-..., 1 workflow(s) verified)
+  [PrescribeMedication] COMPLETE: dispensed: id=rx-P-1042-..., patient=P-1042, drug=amoxicillin 500mg
+  [PatientIntake] COMPLETE: dispensed: id=rx-P-1042-..., patient=P-1042, drug=amoxicillin 500mg
+  [main] Workflow completed! Output: "dispensed: ..."
 
-========================
+================
 = COMPLETE =
-========================
+================
 ```
+
+## Standalone-mode note
+
+In standalone mode the sidecar will log `propagating unsigned workflow history to ...` warnings — these are expected. Without `WorkflowHistorySigning` enabled, propagated history chunks aren't cryptographically signed, which is fine for a local `dapr run` demo. Signing the chunks within an mTLS trust boundary is a production concern handled at the cluster/control-plane level and is out of scope for this quickstart.
 
 ## Stop the sample
 
@@ -148,5 +160,6 @@ dapr stop -f .
 - [Proposal: Workflow History Propagation (dapr/proposals#102)](https://github.com/dapr/proposals/issues/102)
 - [Runtime PR: dapr/dapr#9810](https://github.com/dapr/dapr/pull/9810)
 - [Python SDK PR: dapr/python-sdk#1025](https://github.com/dapr/python-sdk/pull/1025)
-- [Go SDK reference: dapr/go-sdk#823](https://github.com/dapr/go-sdk/pull/823)
+- [Canonical Go SDK reference: dapr/go-sdk#823](https://github.com/dapr/go-sdk/pull/823)
+- [Sibling Go quickstart: dapr/quickstarts#1315](https://github.com/dapr/quickstarts/pull/1315)
 - [Dapr Workflow documentation](https://docs.dapr.io/developing-applications/building-blocks/workflow/)
