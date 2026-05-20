@@ -23,9 +23,7 @@ name: Install requirements
 -->
 
 ```sh
-cd ./order-processor
-pip3 install -r requirements.txt
-cd ..
+uv sync
 ```
 
 <!-- END_STEP -->
@@ -42,7 +40,7 @@ sleep: 15
 -->
 
 ```sh
-dapr run -f .
+uv run dapr run -f .
 ```
 
 <!-- END_STEP -->

@@ -344,7 +344,7 @@ name: "Install python requirements"
 1. Install dependencies:
 
    ```bash
-   pip3 install requests
+   uv sync
    ```
 
 <!-- END_STEP -->
@@ -365,7 +365,7 @@ sleep: 30
 2. Start the Python App with Dapr:
 
    ```bash
-   dapr run --app-id pythonapp python3 app.py
+   dapr run --app-id pythonapp uv run python app.py
    ```
 
 <!-- END_STEP -->
