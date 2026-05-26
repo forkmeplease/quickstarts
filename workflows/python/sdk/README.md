@@ -16,7 +16,7 @@ The quickstart contains 1 workflow (order_processing_workflow) which simulates p
 
 ### Run the order processor workflow
 
-1. Open a new terminal window and navigate to `order-processor` directory: 
+1. Open a new terminal window in this quickstart directory and install dependencies:
 
 <!-- STEP
 name: Install requirements

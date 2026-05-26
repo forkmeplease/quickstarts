@@ -101,7 +101,9 @@ For more LLM options, see the [supported Conversation components](https://docs.d
 
     ```text
     Input sent: calculate square root of 15
-    Output response: ConversationResultAlpha2Choices(finish_reason='tool_calls', index=0, message=ConversationResultAlpha2Message(content='calculate square root of 15', tool_calls=[ConversationToolCalls(id='0', function=ConversationToolCallsOfFunction(name='get_weather', arguments='location,unit'))]))
+    Output response: ConversationResultAlpha2Choices(finish_reason='tool_calls', index=0, message=ConversationResultAlpha2Message(content='calculate square root of 15', tool_calls=[ConversationToolCalls(id='0', function=ConversationToolCallsOfFunction(name='calculate', arguments='expression'))]))
+    Input sent: get weather in San Francisco in celsius
+    Output response: ConversationResultAlpha2Choices(finish_reason='tool_calls', index=0, message=ConversationResultAlpha2Message(content='get weather in San Francisco in celsius', tool_calls=[ConversationToolCalls(id='0', function=ConversationToolCallsOfFunction(name='get_weather', arguments='location,unit'))]))
     ```
 
     <!-- END_STEP -->

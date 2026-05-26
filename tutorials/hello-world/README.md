@@ -339,6 +339,7 @@ Now open a **new** terminal and go to the `./hello-world/python` directory.
 
 <!-- STEP
 name: "Install python requirements"
+working_dir: python
 -->
 
 1. Install dependencies:

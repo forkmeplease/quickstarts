@@ -19,7 +19,7 @@ This section shows how to run both applications at once using [multi-app run tem
 1. Open a new terminal window and install dependencies for `order-processor` and `checkout` apps:
 
 <!-- STEP
-name: Install Node dependencies for order-processor and checkout
+name: Install Python dependencies for order-processor and checkout
 -->
 
 ```bash
