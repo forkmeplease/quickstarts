@@ -99,7 +99,7 @@ jobs:
           pip3 install mechanical-markdown
       - name: Validate building blocks with Java
         run: |
-          variants=("http" "sdk")
+          variants=("http" "sdk" "sdk-context-propagation")
           building_blocks=$(find . -maxdepth 1 -mindepth 1 -type d)
           for building_block in $building_blocks; do
             for variant in "${variants[@]}"
