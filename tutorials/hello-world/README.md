@@ -366,7 +366,7 @@ sleep: 30
 2. Start the Python App with Dapr:
 
    ```bash
-   dapr run --app-id pythonapp uv run python app.py
+   dapr run --app-id pythonapp .venv/bin/python app.py
    ```
 
 <!-- END_STEP -->
