@@ -20,16 +20,29 @@ public class PatientRecord {
   private String condition;
   private String medication;
   private int dosage;
+  /**
+   * When true (default), PatientIntake forwards its execution history to the
+   * child PrescribeMedication workflow via {@code propagateLineage()}. When
+   * false, no propagation options are passed - downstream consumers cannot
+   * verify the upstream pipeline and the prescription is blocked.
+   */
+  private boolean propagateHistory = true;
 
   public PatientRecord() {
   }
 
   public PatientRecord(String patientId, String name, String condition, String medication, int dosage) {
+    this(patientId, name, condition, medication, dosage, true);
+  }
+
+  public PatientRecord(String patientId, String name, String condition, String medication,
+                       int dosage, boolean propagateHistory) {
     this.patientId = patientId;
     this.name = name;
     this.condition = condition;
     this.medication = medication;
     this.dosage = dosage;
+    this.propagateHistory = propagateHistory;
   }
 
   public String getPatientId() {
@@ -72,10 +85,18 @@ public class PatientRecord {
     this.dosage = dosage;
   }
 
+  public boolean isPropagateHistory() {
+    return propagateHistory;
+  }
+
+  public void setPropagateHistory(boolean propagateHistory) {
+    this.propagateHistory = propagateHistory;
+  }
+
   @Override
   public String toString() {
     return "PatientRecord [patientId=" + patientId + ", name=" + name
         + ", condition=" + condition + ", medication=" + medication
-        + ", dosage=" + dosage + "mg]";
+        + ", dosage=" + dosage + "mg, propagateHistory=" + propagateHistory + "]";
   }
 }

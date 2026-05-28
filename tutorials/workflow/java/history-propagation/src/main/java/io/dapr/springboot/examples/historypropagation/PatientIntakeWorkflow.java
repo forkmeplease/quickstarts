@@ -51,12 +51,26 @@ public class PatientIntakeWorkflow implements Workflow {
       }
       logger.info("Insurance verified: policy {}", insurance.getPolicyNumber());
 
-      PrescriptionResult result = ctx.callChildWorkflow(
-          PrescribeMedicationWorkflow.class.getName(),
-          rec,
-          null,
-          WorkflowTaskOptions.propagateLineage(),
-          PrescriptionResult.class).await();
+      // When propagateHistory is false, the child workflow receives no
+      // propagated history and ComplianceAudit cannot verify the upstream
+      // VerifyInsurance/CheckAllergies/ScreenDrugInteractions steps - the
+      // prescription is blocked and dispensed=false.
+      PrescriptionResult result;
+      if (rec.isPropagateHistory()) {
+        logger.info("Calling PrescribeMedicationWorkflow with LINEAGE propagation");
+        result = ctx.callChildWorkflow(
+            PrescribeMedicationWorkflow.class.getName(),
+            rec,
+            null,
+            WorkflowTaskOptions.propagateLineage(),
+            PrescriptionResult.class).await();
+      } else {
+        logger.info("Calling PrescribeMedicationWorkflow WITHOUT propagation (failure scenario)");
+        result = ctx.callChildWorkflow(
+            PrescribeMedicationWorkflow.class.getName(),
+            rec,
+            PrescriptionResult.class).await();
+      }
 
       logger.info("Prescription pipeline complete: dispensed={}", result.isDispensed());
       ctx.complete(result);

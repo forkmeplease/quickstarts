@@ -1,23 +1,6 @@
 # Workflow History Propagation
 
-This tutorial demonstrates **workflow history propagation**, a Dapr 1.18 feature that lets a parent workflow share its execution history with child workflows and activities. Downstream services can inspect the propagated history to make trust-aware decisions — without any external state store or custom messaging.
-
-> **Runtime requirement**: Dapr 1.18+ ([dapr/dapr#9810](https://github.com/dapr/dapr/pull/9810))
-> **Java SDK requirement**: `dapr-spring-bom >= 1.18.0-rc-2` ([dapr/java-sdk#1739](https://github.com/dapr/java-sdk/pull/1739), backported in [dapr/java-sdk#1751](https://github.com/dapr/java-sdk/pull/1751))
-> **Proposal**: [dapr/proposals#102](https://github.com/dapr/proposals/issues/102)
-
-For more information about Dapr Workflows in general, see the [Dapr docs](https://docs.dapr.io/developing-applications/building-blocks/workflow/workflow-features-concepts/).
-
-## Two propagation modes
-
-When a parent workflow invokes a child workflow or an activity, it can attach a snapshot of its own execution history. The receiver reads that snapshot via `ctx.getPropagatedHistory()`.
-
-| Mode | Constant | What the receiver sees |
-|------|----------|----------------------|
-| **Own history** | `HistoryPropagationScope.OWN_HISTORY` | Only the direct caller's events |
-| **Lineage** | `HistoryPropagationScope.LINEAGE` | Caller's events **plus** any ancestor history the caller itself received |
-
-`OWN_HISTORY` acts as a trust boundary — ancestors above the direct caller are dropped, so the receiver can't observe upstream steps.
+This tutorial demonstrates **workflow history propagation**, a Dapr 1.18+ feature that lets a parent workflow share its execution history with child workflows and activities. Downstream services can inspect the propagated history to make trust-aware decisions — without any external state store or custom messaging. See the [Dapr docs](https://github.com/dapr/docs/pull/5153) for the feature reference.
 
 ## Scenario: Patient intake / e-prescribing
 
@@ -87,18 +70,18 @@ historyOpt.ifPresent(history -> {
 });
 ```
 
-> **Replay safety**: workflow code re-executes many times during durable execution. Use `ctx.getLogger()` inside workflow bodies for replay-safe logging; inside activities (which don't replay), `LoggerFactory.getLogger(...)` is fine.
-
 ## Run the tutorial
 
 1. Use a terminal to navigate to the `tutorials/workflow/java/history-propagation` folder.
-2. Build and run the project using Maven. This spins up a Dapr 1.18 sidecar via Testcontainers.
+2. Build and run the project using Maven. This spins up a Dapr sidecar via Testcontainers.
 
     ```bash
     mvn spring-boot:test-run
     ```
 
-3. Use the POST request in the [`history-propagation.http`](./history-propagation.http) file to start the workflow, or use this cURL command:
+### Scenario 1 (happy path): lineage forwarded — pharmacy dispenses
+
+3. Use the first POST request in the [`history-propagation.http`](./history-propagation.http) file, or use this cURL command:
 
     ```bash
     curl -i --request POST \
@@ -109,11 +92,12 @@ historyOpt.ifPresent(history -> {
         "name": "Jane Doe",
         "condition": "bacterial sinusitis",
         "medication": "amoxicillin",
-        "dosage": 500
+        "dosage": 500,
+        "propagateHistory": true
       }'
     ```
 
-    The app logs should show the three `PROPAGATION-DEMO` markers proving the feature works:
+    The app logs should show the propagation markers proving the feature works:
 
     ```text
     i.d.s.e.h.PatientIntakeWorkflow         : PROPAGATION-DEMO: root workflow received no propagated history (expected)
@@ -127,31 +111,61 @@ historyOpt.ifPresent(history -> {
     i.d.s.e.h.a.DispenseMedicationActivity  : DISPENSED: rx-P-1042-... (amoxicillin 500mg) for patient P-1042
     ```
 
-4. Use the GET request in the [`history-propagation.http`](./history-propagation.http) file to get the output, or use this cURL command:
+4. Fetch the output with the GET request in the .http file, or:
 
     ```bash
     curl --request GET --url http://localhost:8080/output
     ```
 
-5. The expected serialized output of the workflow is:
+    Expected:
 
     ```json
     {"dispensed":true,"dispenseId":"rx-P-1042-<ts>","patientId":"P-1042","medication":"amoxicillin"}
     ```
 
-6. Stop the application by pressing `Ctrl+C`.
+### Scenario 2 (failure): lineage withheld — pharmacy refuses
 
-## What if I run this against Dapr < 1.18?
+When `propagateHistory` is `false`, `PatientIntakeWorkflow` invokes `PrescribeMedicationWorkflow` **without** propagation options. `ComplianceAuditWorkflow` then receives no PatientIntake events in its propagated history, can't verify `VerifyInsurance` ran, and blocks the prescription.
 
-`ctx.getPropagatedHistory()` returns `Optional.empty()` everywhere. `ComplianceAuditWorkflow` then refuses to approve (can't verify upstream checks) and the workflow completes with `dispensed=false`. The tutorial's Testcontainers setup pins the sidecar to 1.18, so this only happens if you wire it to an older runtime manually.
+5. Use the second POST request in the .http file, or:
 
-## References
+    ```bash
+    curl -i --request POST \
+      --url http://localhost:8080/start \
+      --header 'content-type: application/json' \
+      --data '{
+        "patientId": "P-2087",
+        "name": "John Roe",
+        "condition": "strep throat",
+        "medication": "penicillin",
+        "dosage": 500,
+        "propagateHistory": false
+      }'
+    ```
 
-- [Proposal: Workflow History Propagation (dapr/proposals#102)](https://github.com/dapr/proposals/issues/102)
-- [Runtime PR: dapr/dapr#9810](https://github.com/dapr/dapr/pull/9810)
-- [Java SDK PR: dapr/java-sdk#1739](https://github.com/dapr/java-sdk/pull/1739) (backport: [#1751](https://github.com/dapr/java-sdk/pull/1751))
-- [Canonical Go SDK reference: dapr/go-sdk#823](https://github.com/dapr/go-sdk/pull/823)
-- [Sibling Python quickstart: dapr/quickstarts#1309](https://github.com/dapr/quickstarts/pull/1309)
-- [Sibling .NET quickstart: dapr/quickstarts#1310](https://github.com/dapr/quickstarts/pull/1310)
-- [Sibling Go quickstart: dapr/quickstarts#1315](https://github.com/dapr/quickstarts/pull/1315)
-- [Dapr Workflow documentation](https://docs.dapr.io/developing-applications/building-blocks/workflow/)
+    The app logs show the audit failing because it cannot find the upstream `VerifyInsurance` activity in the propagated history:
+
+    ```text
+    i.d.s.e.h.PatientIntakeWorkflow         : Calling PrescribeMedicationWorkflow WITHOUT propagation (failure scenario)
+    i.d.s.e.h.PrescribeMedicationWorkflow   : Starting prescription: penicillin 500mg for strep throat
+    i.d.s.e.h.ComplianceAuditWorkflow       : PROPAGATION-DEMO: scope=LINEAGE workflows=1
+    i.d.s.e.h.ComplianceAuditWorkflow       :   upstream activity VerifyInsurance: completed=false
+    i.d.s.e.h.ComplianceAuditWorkflow       :   upstream activity CheckAllergies: completed=true
+    i.d.s.e.h.ComplianceAuditWorkflow       :   upstream activity ScreenDrugInteractions: completed=true
+    i.d.s.e.h.ComplianceAuditWorkflow       : BLOCKED - missing upstream checks: insurance=false allergies=true interactions=true
+    i.d.s.e.h.PrescribeMedicationWorkflow   : Audit blocked dispensing - aborting prescription
+    ```
+
+6. Fetch the output:
+
+    ```bash
+    curl --request GET --url http://localhost:8080/output
+    ```
+
+    Expected:
+
+    ```json
+    {"dispensed":false,"dispenseId":null,"patientId":"P-2087","medication":"penicillin"}
+    ```
+
+7. Stop the application by pressing `Ctrl+C`.
