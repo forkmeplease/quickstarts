@@ -33,32 +33,21 @@ PatientIntake (workflow)
 | `PropagationScope.LINEAGE` | Caller's own events + any ancestor events it received | Full chain-of-custody verification (compliance audits) |
 | `PropagationScope.OWN_HISTORY` | Caller's own events only (no ancestor chain) | Trust boundary — downstream only sees the immediate caller (pharmacy dispense) |
 
-### Key demonstration
-
-- **ComplianceAudit** receives the full lineage via `PropagationScope.LINEAGE` —
-  it verifies that `VerifyInsurance` ran in the grandparent workflow
-  (PatientIntake), plus `CheckAllergies` and `ScreenDrugInteractions`
-  ran in PrescribeMedication.
-
-- **DispenseMedication** receives only PrescribeMedication's history via
-  `PropagationScope.OWN_HISTORY`. The PatientIntake ancestral history is
-  excluded — the pharmacy system doesn't need (or get to see) the upstream
-  chain. Before dispensing, the pharmacy verifies that `CheckAllergies` and
-  `ScreenDrugInteractions` completed in the propagated history.
-
 ### Scenarios
 
-The demo runs two scenarios back-to-back to show both the happy path and
-the pharmacy's safety check:
+`ComplianceAudit` always runs with `PropagationScope.LINEAGE`, so it sees the
+full ancestor chain — `VerifyInsurance` from PatientIntake plus `CheckAllergies`
+and `ScreenDrugInteractions` from PrescribeMedication — and approves only when
+every upstream check completed. The demo then runs `DispenseMedication` twice
+to show the `OWN_HISTORY` trust boundary in action:
 
 1. **Lineage forwarded → pharmacy dispenses.** `PrescribeMedication` calls
-   `DispenseMedication` with `PropagationScope.OWN_HISTORY`. The pharmacy
-   sees the completed allergy and interaction screens in the propagated
-   history and fills the prescription.
+   `DispenseMedication` with `PropagationScope.OWN_HISTORY`. The pharmacy sees
+   PrescribeMedication's screening events — but not the PatientIntake chain —
+   and fills the prescription.
 
 2. **Lineage withheld → pharmacy refuses.** `PrescribeMedication` calls
-   `DispenseMedication` **without** history propagation (simulating an
-   upstream system that fails to forward its lineage). With no propagated
+   `DispenseMedication` **without** history propagation. With no propagated
    history to prove the prescription was screened, the pharmacy refuses to
    dispense and returns a `refused` result explaining what was missing.
 
@@ -167,10 +156,5 @@ In scenario 2 (lineage withheld) the pharmacy refuses:
 [PrescribeMedication] Step 4 BLOCKED: pharmacy refused to dispense (missing lineage: no propagated history received from prescriber)
 ```
 
-In standalone mode the sidecar will log
-`propagating unsigned workflow history to ...` warnings — these are
-expected. Without `WorkflowHistorySigning` enabled, propagated history
-chunks aren't cryptographically signed, which is fine for a local
-`dapr run` demo. Signing the chunks within an mTLS trust boundary is a
-production concern handled at the cluster/control-plane level and is out
-of scope for this quickstart.
+In standalone mode the sidecar logs `propagating unsigned workflow history to ...`
+warnings — these are expected and harmless for a local `dapr run` demo.
