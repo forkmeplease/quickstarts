@@ -1,6 +1,6 @@
 # Workflow History Propagation
 
-This tutorial demonstrates **workflow history propagation**, a Dapr 1.18+ feature that lets a parent workflow share its execution history with child workflows and activities. Downstream services can inspect the propagated history to make trust-aware decisions — without any external state store or custom messaging. See the [Dapr docs](https://github.com/dapr/docs/pull/5153) for the feature reference.
+This tutorial demonstrates **workflow history propagation**, a Dapr 1.18+ feature that lets a parent workflow share its execution history with child workflows and activities. Downstream services can inspect the propagated history to make trust-aware decisions — without any external state store or custom messaging. See the [Workflow history propagation](https://docs.dapr.io/developing-applications/building-blocks/workflow/workflow-history-propagation/) for the feature reference.
 
 ## Scenario: Patient intake / e-prescribing
 
@@ -73,31 +73,56 @@ historyOpt.ifPresent(history -> {
 ## Run the tutorial
 
 1. Use a terminal to navigate to the `tutorials/workflow/java/history-propagation` folder.
+
 2. Build and run the project using Maven. This spins up a Dapr sidecar via Testcontainers.
+
+    <!-- STEP
+    name: Start the application
+    expected_stdout_lines:
+      - 'Started HistoryPropagationApplication'
+    output_match_mode: substring
+    background: true
+    sleep: 90
+    timeout_seconds: 240
+    -->
 
     ```bash
     mvn spring-boot:test-run
     ```
 
+    <!-- END_STEP -->
+
 ### Scenario 1 (happy path): lineage forwarded — pharmacy dispenses
 
-3. Use the first POST request in the [`history-propagation.http`](./history-propagation.http) file, or use this cURL command:
+3. Run scenario 1 — the first POST request in the [`history-propagation.http`](./history-propagation.http) file, then poll the output endpoint:
+
+    <!-- STEP
+    name: Scenario 1 - lineage forwarded
+    expected_stdout_lines:
+      - '"dispensed":true'
+      - '"medication":"amoxicillin"'
+    output_match_mode: substring
+    timeout_seconds: 90
+    -->
 
     ```bash
-    curl -i --request POST \
-      --url http://localhost:8080/start \
-      --header 'content-type: application/json' \
-      --data '{
-        "patientId": "P-1042",
-        "name": "Jane Doe",
-        "condition": "bacterial sinusitis",
-        "medication": "amoxicillin",
-        "dosage": 500,
-        "propagateHistory": true
-      }'
+    curl -s -X POST http://localhost:8080/start \
+      -H 'content-type: application/json' \
+      -d '{"patientId":"P-1042","name":"Jane Doe","condition":"bacterial sinusitis","medication":"amoxicillin","dosage":500,"propagateHistory":true}'
+    echo ""
+    for i in $(seq 1 30); do
+      OUT=$(curl -s http://localhost:8080/output)
+      if echo "$OUT" | grep -q '"medication":"amoxicillin"'; then
+        echo "$OUT"
+        break
+      fi
+      sleep 2
+    done
     ```
 
-    The app logs should show the propagation markers proving the feature works:
+    <!-- END_STEP -->
+
+    The app logs show the propagation markers proving the feature works:
 
     ```text
     i.d.s.e.h.PatientIntakeWorkflow         : PROPAGATION-DEMO: root workflow received no propagated history (expected)
@@ -111,13 +136,7 @@ historyOpt.ifPresent(history -> {
     i.d.s.e.h.a.DispenseMedicationActivity  : DISPENSED: rx-P-1042-... (amoxicillin 500mg) for patient P-1042
     ```
 
-4. Fetch the output with the GET request in the .http file, or:
-
-    ```bash
-    curl --request GET --url http://localhost:8080/output
-    ```
-
-    Expected:
+    The GET /output response is:
 
     ```json
     {"dispensed":true,"dispenseId":"rx-P-1042-<ts>","patientId":"P-1042","medication":"amoxicillin"}
@@ -127,21 +146,33 @@ historyOpt.ifPresent(history -> {
 
 When `propagateHistory` is `false`, `PatientIntakeWorkflow` invokes `PrescribeMedicationWorkflow` **without** propagation options. `ComplianceAuditWorkflow` then receives no PatientIntake events in its propagated history, can't verify `VerifyInsurance` ran, and blocks the prescription.
 
-5. Use the second POST request in the .http file, or:
+4. Run scenario 2 — the second POST request, polling the output endpoint until the failed result lands:
+
+    <!-- STEP
+    name: Scenario 2 - lineage withheld
+    expected_stdout_lines:
+      - '"dispensed":false'
+      - '"medication":"penicillin"'
+    output_match_mode: substring
+    timeout_seconds: 90
+    -->
 
     ```bash
-    curl -i --request POST \
-      --url http://localhost:8080/start \
-      --header 'content-type: application/json' \
-      --data '{
-        "patientId": "P-2087",
-        "name": "John Roe",
-        "condition": "strep throat",
-        "medication": "penicillin",
-        "dosage": 500,
-        "propagateHistory": false
-      }'
+    curl -s -X POST http://localhost:8080/start \
+      -H 'content-type: application/json' \
+      -d '{"patientId":"P-2087","name":"John Roe","condition":"strep throat","medication":"penicillin","dosage":500,"propagateHistory":false}'
+    echo ""
+    for i in $(seq 1 30); do
+      OUT=$(curl -s http://localhost:8080/output)
+      if echo "$OUT" | grep -q '"medication":"penicillin"'; then
+        echo "$OUT"
+        break
+      fi
+      sleep 2
+    done
     ```
+
+    <!-- END_STEP -->
 
     The app logs show the audit failing because it cannot find the upstream `VerifyInsurance` activity in the propagated history:
 
@@ -156,16 +187,10 @@ When `propagateHistory` is `false`, `PatientIntakeWorkflow` invokes `PrescribeMe
     i.d.s.e.h.PrescribeMedicationWorkflow   : Audit blocked dispensing - aborting prescription
     ```
 
-6. Fetch the output:
-
-    ```bash
-    curl --request GET --url http://localhost:8080/output
-    ```
-
-    Expected:
+    The GET /output response is:
 
     ```json
     {"dispensed":false,"dispenseId":null,"patientId":"P-2087","medication":"penicillin"}
     ```
 
-7. Stop the application by pressing `Ctrl+C`.
+5. Stop the application by pressing `Ctrl+C`.
