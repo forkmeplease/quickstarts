@@ -61,7 +61,6 @@ def _describe_history(history: wf.PropagatedHistory | None) -> str:
 
 @wfr.activity(name='VerifyInsurance')
 def verify_insurance(ctx: wf.WorkflowActivityContext, rec_json: str) -> bool:
-    """Check the patient has active coverage on file."""
     rec = PatientRecord.from_json(rec_json)
     print(f'  [VerifyInsurance] Checking coverage for patient {rec.patient_id}', flush=True)
     return True
@@ -69,7 +68,6 @@ def verify_insurance(ctx: wf.WorkflowActivityContext, rec_json: str) -> bool:
 
 @wfr.activity(name='CheckAllergies')
 def check_allergies(ctx: wf.WorkflowActivityContext, rec_json: str) -> bool:
-    """Look up the patient's allergy list and clear or block the prescription."""
     rec = PatientRecord.from_json(rec_json)
     history = ctx.get_propagated_history()
     print(
@@ -82,7 +80,6 @@ def check_allergies(ctx: wf.WorkflowActivityContext, rec_json: str) -> bool:
 
 @wfr.activity(name='ScreenDrugInteractions')
 def screen_drug_interactions(ctx: wf.WorkflowActivityContext, rec_json: str) -> bool:
-    """Check the candidate prescription against the patient's active medication list."""
     rec = PatientRecord.from_json(rec_json)
     history = ctx.get_propagated_history()
     print(
@@ -95,11 +92,7 @@ def screen_drug_interactions(ctx: wf.WorkflowActivityContext, rec_json: str) -> 
 
 @wfr.activity(name='DispenseMedication')
 def dispense_medication(ctx: wf.WorkflowActivityContext, rec_json: str) -> str:
-    """Issue the final prescription.
-
-    Pharmacy policy: no lineage, no dispense. Without propagated history the
-    pharmacy cannot prove the prescription was screened, so it refuses.
-    """
+    """Refuses to dispense unless the propagated history proves screening ran."""
     rec = PatientRecord.from_json(rec_json)
     history = ctx.get_propagated_history()
     print(
@@ -196,11 +189,7 @@ def dispense_medication(ctx: wf.WorkflowActivityContext, rec_json: str) -> str:
 
 @wfr.workflow(name='ComplianceAudit')
 def compliance_audit(ctx: wf.DaprWorkflowContext, rec_json: str):
-    """Inspect the parent's propagated history to verify the prescribing pipeline ran.
-
-    Refuses to approve dispensing unless the required upstream steps (insurance,
-    allergies, interactions) are all present and completed in the propagated history.
-    """
+    """Approves only if the propagated history shows insurance + screening completed."""
     rec = PatientRecord.from_json(rec_json)
     if not ctx.is_replaying:
         print(
@@ -302,12 +291,6 @@ def compliance_audit(ctx: wf.DaprWorkflowContext, rec_json: str):
 
 @wfr.workflow(name='PrescribeMedication')
 def prescribe_medication(ctx: wf.DaprWorkflowContext, rec_json: str):
-    """Orchestrate an e-prescription.
-
-    Checks the patient's allergies, screens for drug interactions, runs a
-    compliance audit (as a child wf with full lineage), and dispenses the
-    medication (as an activity with workflow-level propagation only).
-    """
     rec = PatientRecord.from_json(rec_json)
     if not ctx.is_replaying:
         print(
@@ -316,7 +299,6 @@ def prescribe_medication(ctx: wf.DaprWorkflowContext, rec_json: str):
             flush=True,
         )
 
-    # Step 1: Allergy check (no propagation — plain activity)
     if not ctx.is_replaying:
         print(
             '  [PrescribeMedication] Step 1: CallActivity(CheckAllergies) — no propagation',
@@ -328,7 +310,6 @@ def prescribe_medication(ctx: wf.DaprWorkflowContext, rec_json: str):
     if not ctx.is_replaying:
         print('  [PrescribeMedication] Step 1 complete: allergy clear', flush=True)
 
-    # Step 2: Drug interaction screen (no propagation — plain activity)
     if not ctx.is_replaying:
         print(
             '  [PrescribeMedication] Step 2: CallActivity(ScreenDrugInteractions) '
@@ -341,8 +322,6 @@ def prescribe_medication(ctx: wf.DaprWorkflowContext, rec_json: str):
     if not ctx.is_replaying:
         print('  [PrescribeMedication] Step 2 complete: no interactions', flush=True)
 
-    # Step 3: Compliance audit as a child wf.
-    # PropagationScope.LINEAGE — include our events AND any ancestral history we received.
     if not ctx.is_replaying:
         print(
             '  [PrescribeMedication] Step 3: CallChildWorkflow(ComplianceAudit)',
@@ -370,26 +349,20 @@ def prescribe_medication(ctx: wf.DaprWorkflowContext, rec_json: str):
             flush=True,
         )
 
-    # Step 4: Dispense the medication.
-    # Happy path: attach PropagationScope.OWN_HISTORY — the pharmacy sees our
-    # events only (no ancestral chain) and can verify the screens ran.
-    # Negative scenario (rec.forward_lineage == False): omit propagation, so the
-    # pharmacy receives no lineage and refuses to dispense.
+    # Step 4 demonstrates the two propagation modes side-by-side: forward_lineage=True
+    # attaches OWN_HISTORY so the pharmacy can verify upstream screening;
+    # forward_lineage=False omits propagation, so the pharmacy refuses to dispense.
     if not ctx.is_replaying:
+        print(
+            '  [PrescribeMedication] Step 4: CallActivity(DispenseMedication)',
+            flush=True,
+        )
         if rec.forward_lineage:
-            print(
-                '  [PrescribeMedication] Step 4: CallActivity(DispenseMedication)',
-                flush=True,
-            )
             print(
                 '                        -> propagation=PropagationScope.OWN_HISTORY',
                 flush=True,
             )
         else:
-            print(
-                '  [PrescribeMedication] Step 4: CallActivity(DispenseMedication)',
-                flush=True,
-            )
             print(
                 '                        -> NO history propagation (negative scenario)',
                 flush=True,
@@ -429,12 +402,6 @@ def prescribe_medication(ctx: wf.DaprWorkflowContext, rec_json: str):
 
 @wfr.workflow(name='PatientIntake')
 def patient_intake(ctx: wf.DaprWorkflowContext, rec_json: str):
-    """Top-level workflow.
-
-    Verifies the patient's insurance, then calls PrescribeMedication as a child
-    workflow with PropagationScope.LINEAGE, giving PrescribeMedication ancestral
-    history to forward (or not) downstream.
-    """
     rec = PatientRecord.from_json(rec_json)
     if not ctx.is_replaying:
         print(f'  [PatientIntake] Starting intake for patient {rec.patient_id}', flush=True)

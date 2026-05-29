@@ -11,12 +11,6 @@ audit and a pharmacy dispense step refuse to act unless they can see
 proof — in the propagated history — that the required upstream checks
 (insurance, allergies, drug interactions) actually ran.
 
-This is the Python sibling of the canonical Go quickstart in
-[`tutorials/workflow/go/history-propagation`](../../go/history-propagation),
-itself based on [dapr/go-sdk#823](https://github.com/dapr/go-sdk/pull/823).
-Python runtime support landed in
-[dapr/python-sdk#1025](https://github.com/dapr/python-sdk/pull/1025).
-
 ## Workflow architecture
 
 ```
@@ -111,8 +105,7 @@ Key symbols exported from `dapr.ext.workflow`:
 
 ## Running this example
 
-Requires Dapr `1.18.0+` (workflow history propagation),
-`dapr-ext-workflow>=1.18.0rc0`, and `dapr>=1.18.0rc0`.
+Requires Dapr `1.18+`.
 
 Install the Python dependencies:
 
@@ -155,8 +148,6 @@ dapr run -f .
 
 <!-- END_STEP -->
 
-The app runs both scenarios once and exits on its own — no Ctrl+C needed.
-
 In scenario 1 (lineage forwarded) you'll see the pharmacy dispense:
 
 ```
@@ -183,16 +174,3 @@ chunks aren't cryptographically signed, which is fine for a local
 `dapr run` demo. Signing the chunks within an mTLS trust boundary is a
 production concern handled at the cluster/control-plane level and is out
 of scope for this quickstart.
-
-## Files
-
-```
-history-propagation/
-├── README.md          # this file
-├── dapr.yaml          # `dapr run -f .` config (appID, resources, command)
-├── makefile           # wires the example into `make validate`
-├── app.py             # registry + worker setup, schedules both scenarios
-├── models.py          # PatientRecord, ComplianceResult, DispenseResult
-├── workflow.py        # workflow + activity definitions, history helpers
-└── requirements.txt   # Python deps
-```
