@@ -11,7 +11,7 @@
 // limitations under the License.
 // ------------------------------------------------------------------------
 
-namespace OrderProcessor;
+namespace PatientIntake;
 
 using Dapr.Workflow;
 
@@ -105,11 +105,6 @@ public sealed class PrescribeMedicationWorkflow : Workflow<PatientRecord, string
         // and can verify that the allergy and interaction screens ran. In the
         // negative scenario (rec.ForwardLineage == false) we deliberately omit
         // propagation, so the pharmacy receives no lineage and refuses.
-        //
-        // Note: the .NET SDK propagation support is on ChildWorkflowTaskOptions
-        // only. For a trust-boundary demo equivalent to PropagateOwnHistory() on
-        // the activity call in Python/Go, the dispense step is implemented as a
-        // child workflow (not a bare activity).
         if (!ctx.IsReplaying)
         {
             Console.WriteLine("  [PrescribeMedication] Step 4: DispenseMedicationWorkflow child wf");

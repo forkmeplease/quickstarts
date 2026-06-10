@@ -11,7 +11,7 @@
 // limitations under the License.
 // ------------------------------------------------------------------------
 
-namespace OrderProcessor;
+namespace PatientIntake;
 
 using Dapr.Workflow;
 

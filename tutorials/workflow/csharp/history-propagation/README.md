@@ -101,17 +101,16 @@ Key types in `Dapr.Workflow`:
 
 ## Running this example
 
-Requires Dapr `1.18.0+` (workflow history propagation),
-`Dapr.Workflow 1.18.0+`, and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-(or newer). Redis is started automatically by `dapr init`.
+ 1. Requires Dapr `1.18.0+` (workflow history propagation),
+ 2. `Dapr.Workflow 1.18.0+`, and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+    (or newer). Redis is started automatically by `dapr init`.
+ 3. Build the example:
 
-Build the example:
+    ```bash
+    dotnet build ./order-processor
+    ```
 
-```bash
-dotnet build ./order-processor
-```
-
-Run the demo:
+ 4. Run the demo:
 
 <!-- STEP
 name: Run history-propagation demo
@@ -129,11 +128,13 @@ timeout_seconds: 180
 sleep: 15
 -->
 
-```bash
-dapr run -f .
-```
+    ```bash
+    dapr run -f .
+    ```
 
 <!-- END_STEP -->
+
+---
 
 The app runs both scenarios once and exits on its own — no Ctrl+C needed.
 
