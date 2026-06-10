@@ -128,9 +128,9 @@ timeout_seconds: 180
 sleep: 15
 -->
 
-    ```bash
-    dapr run -f .
-    ```
+```bash
+dapr run -f .
+```
 
 <!-- END_STEP -->
 
