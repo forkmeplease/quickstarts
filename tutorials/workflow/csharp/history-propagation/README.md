@@ -1,18 +1,10 @@
 # Dapr Workflow History Propagation — Patient Intake (.NET SDK)
 
-This quickstart demonstrates **workflow history propagation**, a Dapr 1.18
-feature that lets a workflow propagate its execution history to child workflows
-so downstream consumers can inspect the full (or partial) execution context of
-their caller — without any external state store or custom messaging.
-
-The scenario is a patient intake / e-prescribing pipeline: a compliance audit
-and a pharmacy dispense step refuse to act unless they can see proof — in the
-propagated history — that the required upstream checks (insurance, allergies,
-drug interactions) actually ran.
-
-> **Runtime requirement**: Dapr 1.18+ ([dapr/dapr#9810](https://github.com/dapr/dapr/pull/9810))
-> **SDK requirement**: `Dapr.Workflow >= 1.18.0-rc01` ([dapr/dotnet-sdk#1802](https://github.com/dapr/dotnet-sdk/pull/1802))
-> **Proposal**: [dapr/proposals#102](https://github.com/dapr/proposals/issues/102)
+This example demonstrates how Dapr workflows can propagate their execution
+history to child workflows and activities, so downstream consumers can
+inspect the full (or partial) execution context of their caller. See the
+[Workflow history propagation](https://docs.dapr.io/developing-applications/building-blocks/workflow/workflow-history-propagation/)
+docs for the concept overview.
 
 ## Workflow architecture
 
@@ -65,18 +57,6 @@ pharmacy's safety check:
    prescription was screened, the pharmacy refuses to dispense and returns a
    `refused` result explaining what was missing.
 
-## .NET note: dispense is a child workflow
-
-The Python sibling ([dapr/quickstarts#1309](https://github.com/dapr/quickstarts/pull/1309))
-and the Go reference call the final dispense step as a bare **activity** with an
-`OwnHistory` propagation argument. In the .NET SDK (v1.18)
-`HistoryPropagationScope` is only available on `ChildWorkflowTaskOptions` —
-activity calls do not carry a propagation scope. To demonstrate the identical
-trust-boundary semantics, this sample wraps the `DispenseMedicationActivity`
-inside `DispenseMedicationWorkflow` (a child workflow) which inspects the
-propagated history and only calls the activity once it has verified the
-screening lineage.
-
 ## .NET API surface
 
 ```csharp
@@ -122,7 +102,7 @@ Key types in `Dapr.Workflow`:
 ## Running this example
 
 Requires Dapr `1.18.0+` (workflow history propagation),
-`Dapr.Workflow 1.18.0-rc01+`, and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+`Dapr.Workflow 1.18.0+`, and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 (or newer). Redis is started automatically by `dapr init`.
 
 Build the example:
@@ -184,29 +164,3 @@ propagated history chunks aren't cryptographically signed, which is fine for a
 local `dapr run` demo. Signing the chunks within an mTLS trust boundary is a
 production concern handled at the cluster/control-plane level and is out of
 scope for this quickstart.
-
-## Files
-
-```
-sdk-context-propagation/
-├── README.md                       # this file
-├── dapr.yaml                       # `dapr run -f .` config (appID, resources, command)
-└── order-processor/
-    ├── Program.cs                  # host setup; schedules both scenarios
-    ├── Models.cs                   # PatientRecord, ComplianceResult, DispenseResult
-    ├── Activities.cs               # VerifyInsurance, CheckAllergies, ScreenDrugInteractions, DispenseMedication
-    ├── Workflows.cs                # workflow definitions + history inspection
-    └── OrderProcessor.csproj       # project + Dapr.Workflow dependency
-```
-
-## References
-
-- Sibling Python quickstart: [dapr/quickstarts#1309](https://github.com/dapr/quickstarts/pull/1309)
-- Canonical Go SDK reference: [dapr/go-sdk#823](https://github.com/dapr/go-sdk/pull/823)
-- Sibling Go quickstart: [dapr/quickstarts#1315](https://github.com/dapr/quickstarts/pull/1315)
-- .NET SDK implementation: [dapr/dotnet-sdk#1802](https://github.com/dapr/dotnet-sdk/pull/1802)
-- Runtime support: [dapr/dapr#9810](https://github.com/dapr/dapr/pull/9810)
-- Docs (.NET): [dapr/docs#5174](https://github.com/dapr/docs/pull/5174)
-- Proposal: [dapr/proposals#102](https://github.com/dapr/proposals/issues/102)
-- 1.18 endgame: [dapr/dapr#9856](https://github.com/dapr/dapr/issues/9856)
-```

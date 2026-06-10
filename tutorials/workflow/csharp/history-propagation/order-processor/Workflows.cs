@@ -19,12 +19,6 @@ using Dapr.Workflow;
 // PatientIntake (root workflow)
 // ---------------------------------------------------------------------------
 
-/// <summary>
-/// Root workflow — verifies the patient's insurance then delegates the
-/// prescription to a child workflow with full
-/// <see cref="HistoryPropagationScope.Lineage"/> propagation so the grandchild
-/// ComplianceAudit can inspect the complete ancestor chain.
-/// </summary>
 public sealed class PatientIntakeWorkflow : Workflow<PatientRecord, string>
 {
     public override async Task<string> RunAsync(WorkflowContext ctx, PatientRecord rec)
@@ -63,14 +57,6 @@ public sealed class PatientIntakeWorkflow : Workflow<PatientRecord, string>
 // PrescribeMedication (child workflow, level 2)
 // ---------------------------------------------------------------------------
 
-/// <summary>
-/// Child workflow — orchestrates allergy + interaction screening, compliance
-/// audit, and dispensing. Receives <see cref="HistoryPropagationScope.Lineage"/>
-/// from PatientIntake, so it holds the full ancestor chain when calling its
-/// own children. Calls ComplianceAudit with Lineage (audit needs to see the
-/// grandparent) and DispenseMedicationWorkflow with OwnHistory (pharmacy only
-/// sees the prescribing step, not the intake).
-/// </summary>
 public sealed class PrescribeMedicationWorkflow : Workflow<PatientRecord, string>
 {
     public override async Task<string> RunAsync(WorkflowContext ctx, PatientRecord rec)
@@ -160,14 +146,6 @@ public sealed class PrescribeMedicationWorkflow : Workflow<PatientRecord, string
 // ComplianceAudit (grandchild workflow, level 3)
 // ---------------------------------------------------------------------------
 
-/// <summary>
-/// Grandchild workflow that inspects the full ancestor chain to make a
-/// trust-aware compliance decision. Receives <see cref="HistoryPropagationScope.Lineage"/>
-/// from PrescribeMedication, so <see cref="WorkflowContext.GetPropagatedHistory"/>
-/// returns entries for both PatientIntake and PrescribeMedication. Refuses to
-/// approve dispensing unless the required upstream steps (insurance, allergies,
-/// drug interactions) are all present and completed in the propagated history.
-/// </summary>
 public sealed class ComplianceAuditWorkflow : Workflow<PatientRecord, ComplianceResult>
 {
     public override Task<ComplianceResult> RunAsync(WorkflowContext ctx, PatientRecord rec)
@@ -261,23 +239,6 @@ public sealed class ComplianceAuditWorkflow : Workflow<PatientRecord, Compliance
 // DispenseMedicationWorkflow (grandchild workflow, level 3)
 // ---------------------------------------------------------------------------
 
-/// <summary>
-/// Dispense workflow — the pharmacy. In the happy path it receives
-/// <see cref="HistoryPropagationScope.OwnHistory"/> from PrescribeMedication, so
-/// it can only see PrescribeMedication's own events (the PatientIntake ancestor
-/// history is intentionally excluded — the pharmacy doesn't need, or get to see,
-/// the upstream patient-intake chain). It refuses to dispense unless the
-/// propagated history proves the prescriber ran the required allergy and
-/// drug-interaction screens. In the negative scenario PrescribeMedication omits
-/// propagation entirely, so this workflow sees no history and refuses.
-/// </summary>
-/// <remarks>
-/// In the Python sibling and the Go reference the pharmacy is a bare activity
-/// because those SDKs support a propagation argument on activity calls. The
-/// .NET SDK's <see cref="HistoryPropagationScope"/> is currently scoped to child
-/// workflows only (<see cref="ChildWorkflowTaskOptions"/>), so the dispense step
-/// is a child workflow here to demonstrate the identical OwnHistory boundary.
-/// </remarks>
 public sealed class DispenseMedicationWorkflow : Workflow<PatientRecord, DispenseResult>
 {
     public override async Task<DispenseResult> RunAsync(WorkflowContext ctx, PatientRecord rec)

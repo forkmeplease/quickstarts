@@ -15,10 +15,6 @@ namespace OrderProcessor;
 
 using Dapr.Workflow;
 
-/// <summary>
-/// Verifies the patient's insurance coverage. Called by PatientIntake without
-/// propagation.
-/// </summary>
 public sealed class VerifyInsuranceActivity : WorkflowActivity<PatientRecord, bool>
 {
     public override Task<bool> RunAsync(WorkflowActivityContext ctx, PatientRecord rec)
@@ -28,10 +24,6 @@ public sealed class VerifyInsuranceActivity : WorkflowActivity<PatientRecord, bo
     }
 }
 
-/// <summary>
-/// Screens the patient against their allergy list for the candidate drug.
-/// Called by PrescribeMedication without propagation.
-/// </summary>
 public sealed class CheckAllergiesActivity : WorkflowActivity<PatientRecord, bool>
 {
     public override Task<bool> RunAsync(WorkflowActivityContext ctx, PatientRecord rec)
@@ -41,10 +33,6 @@ public sealed class CheckAllergiesActivity : WorkflowActivity<PatientRecord, boo
     }
 }
 
-/// <summary>
-/// Screens the candidate prescription against the patient's active medication
-/// list. Called by PrescribeMedication without propagation.
-/// </summary>
 public sealed class ScreenDrugInteractionsActivity : WorkflowActivity<PatientRecord, bool>
 {
     public override Task<bool> RunAsync(WorkflowActivityContext ctx, PatientRecord rec)
@@ -54,10 +42,6 @@ public sealed class ScreenDrugInteractionsActivity : WorkflowActivity<PatientRec
     }
 }
 
-/// <summary>
-/// Fills the prescription. Called by DispenseMedicationWorkflow only after it
-/// has verified the prescribing pipeline in the propagated history.
-/// </summary>
 public sealed class DispenseMedicationActivity : WorkflowActivity<PatientRecord, DispenseResult>
 {
     public override Task<DispenseResult> RunAsync(WorkflowActivityContext ctx, PatientRecord rec)

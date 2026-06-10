@@ -1,50 +1,7 @@
-// ------------------------------------------------------------------------
-// Copyright 2026 The Dapr Authors
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//     http://www.apache.org/licenses/LICENSE-2.0
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-// ------------------------------------------------------------------------
-
-// Workflow History Propagation Quickstart (.NET SDK)
-//
-// Scenario: patient intake / e-prescribing pipeline.
-//
-// Flow:
-//   PatientIntake (root)
-//     └─ VerifyInsurance         (activity, no propagation)
-//     └─ PrescribeMedication     (child wf, HistoryPropagationScope.Lineage)
-//           └─ CheckAllergies                (activity, no propagation)
-//           └─ ScreenDrugInteractions        (activity, no propagation)
-//           └─ ComplianceAudit               (grandchild wf, HistoryPropagationScope.Lineage)
-//           |      reads: PatientIntake + PrescribeMedication events
-//           └─ DispenseMedicationWorkflow    (grandchild wf, HistoryPropagationScope.OwnHistory)
-//                  reads: PrescribeMedication events only
-//                  └─ DispenseMedication      (activity)
-//
-// The demo runs two scenarios back-to-back:
-//   1. Lineage forwarded — PrescribeMedication propagates its own history to the
-//      pharmacy, which verifies the upstream screening and dispenses.
-//   2. Lineage withheld — PrescribeMedication omits propagation, so the pharmacy
-//      receives no lineage and refuses to dispense.
-//
-// Requires Dapr 1.18+ (dapr/dapr#9810) and Dapr.Workflow 1.18+ (dapr/dotnet-sdk#1802).
-// Against an older sidecar GetPropagatedHistory() returns null and the sample
-// exits gracefully.
-
 using Dapr.Workflow;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OrderProcessor;
-
-// ---------------------------------------------------------------------------
-// Host setup — register workflows and activities
-// ---------------------------------------------------------------------------
 
 var builder = Host.CreateDefaultBuilder(args)
     .ConfigureServices(services =>
@@ -146,7 +103,6 @@ async Task RunScenario(string title, string instanceId, PatientRecord rec)
     await workflowClient.PurgeInstanceAsync(instanceId);
 }
 
-// Renders a "= TITLE =" box sized to the title, matching the Go reference.
 static string Banner(string msg)
 {
     var line = new string('=', msg.Length + 4);
