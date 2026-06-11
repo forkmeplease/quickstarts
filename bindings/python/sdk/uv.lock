@@ -149,7 +149,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dapr", specifier = ">=1.18.0rc0" },
+    { name = "dapr", specifier = ">=1.18.0" },
     { name = "flask" },
     { name = "typing-extensions" },
     { name = "uvicorn" },
@@ -188,7 +188,7 @@ wheels = [
 
 [[package]]
 name = "dapr"
-version = "1.18.0rc0"
+version = "1.18.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -199,7 +199,7 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/7e/ec0fb2b09a7be4b662cac3326cdb74bc4fdafd7bd875cc9f340cdbc5d9db/dapr-1.18.0rc0-py3-none-any.whl", hash = "sha256:1f6264aec870c352eb7486b524ce3143ea820a9cdce7afa104719f3d56763d9f", size = 246209, upload-time = "2026-05-19T20:03:02.775Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/94/d981426db04d49b1b3d186e51e4f6744911520fd9ce62f6bfa3d195945be/dapr-1.18.0-py3-none-any.whl", hash = "sha256:933502f853589904ffa20805523a9679934d3d30cde289d25da61e529de70e00", size = 252058, upload-time = "2026-06-10T21:43:19.639Z" },
 ]
 
 [[package]]

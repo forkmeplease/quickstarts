@@ -192,7 +192,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "dapr", specifier = ">=1.18.0rc0" }]
+requires-dist = [{ name = "dapr", specifier = ">=1.18.0" }]
 
 [[package]]
 name = "click"
@@ -230,7 +230,7 @@ wheels = [
 
 [[package]]
 name = "dapr"
-version = "1.18.0rc0"
+version = "1.18.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -241,12 +241,12 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/7e/ec0fb2b09a7be4b662cac3326cdb74bc4fdafd7bd875cc9f340cdbc5d9db/dapr-1.18.0rc0-py3-none-any.whl", hash = "sha256:1f6264aec870c352eb7486b524ce3143ea820a9cdce7afa104719f3d56763d9f", size = 246209, upload-time = "2026-05-19T20:03:02.775Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/94/d981426db04d49b1b3d186e51e4f6744911520fd9ce62f6bfa3d195945be/dapr-1.18.0-py3-none-any.whl", hash = "sha256:933502f853589904ffa20805523a9679934d3d30cde289d25da61e529de70e00", size = 252058, upload-time = "2026-06-10T21:43:19.639Z" },
 ]
 
 [[package]]
 name = "dapr-ext-fastapi"
-version = "1.18.0rc0"
+version = "1.18.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dapr" },
@@ -254,7 +254,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/99/45/db96288a2b3465a41b778b7bb6d23eb3467d6098f1d688caea6b399114af/dapr_ext_fastapi-1.18.0rc0-py3-none-any.whl", hash = "sha256:c85cc15b5a6af082d1a88142a06a223e80ef3f713ee285a3c2b11965601f8d48", size = 9757, upload-time = "2026-05-19T20:03:14.615Z" },
+    { url = "https://files.pythonhosted.org/packages/57/ac/9a4ba0426613fe54cde9f1ef931281f8612cc93ee0cfcc43094ca19ca8ee/dapr_ext_fastapi-1.18.0-py3-none-any.whl", hash = "sha256:96346b6602edd43e72164725a5f3b35e48ab67a47aa6e96795aff42d4334f1e5", size = 9729, upload-time = "2026-06-10T21:43:30.17Z" },
 ]
 
 [[package]]
@@ -728,7 +728,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cloudevents", specifier = ">=2.0.0" },
-    { name = "dapr", specifier = ">=1.18.0rc0" },
+    { name = "dapr", specifier = ">=1.18.0" },
     { name = "flask" },
     { name = "typing-extensions" },
 ]
@@ -749,7 +749,7 @@ dependencies = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.4.0" },
     { name = "cloudevents", specifier = ">=2.0.0" },
-    { name = "dapr-ext-fastapi", specifier = ">=1.18.0rc0" },
+    { name = "dapr-ext-fastapi", specifier = ">=1.18.0" },
     { name = "fastapi" },
     { name = "uvicorn" },
 ]
